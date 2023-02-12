@@ -1,22 +1,24 @@
 #!/usr/bin/env python
 # coding: utf-8
-from functools import lru_cache
-from collections import Counter, defaultdict
 import re
-import datetime
+import csv
 import torch
-import numpy as np
 import pickle
+import datetime
+import numpy as np
+import pandas as pd
+
 from pathlib import Path
 from enum import IntEnum
 from matplotlib import pyplot as plt
 from itertools import product
-import pandas as pd
-import matplotlib
+from functools import lru_cache
+from collections import Counter, defaultdict
 from tqdm.auto import tqdm
 from multiprocessing import Pool
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,8 +57,8 @@ def one_hot_encode(nucleotide, padding=0):
     """入力された文字列に対してOne-hotなnp形式を返す
     """
     # パディングの大きさを指定する
-    arr = np.vstack((np.eye(4), np.ones(4)[None, :]*0.25))
-    return arr[one_hot_index("N"*padding + nucleotide + "N"*padding)].T
+    arr = np.vstack((np.eye(4), np.ones(4)[None, :] * 0.25))
+    return arr[one_hot_index("N" * padding + nucleotide + "N" * padding)].T
 
 
 class SNV(IntEnum):
@@ -67,8 +69,10 @@ class SNV(IntEnum):
 
 class SequenceGenerator():
     def __init__(self, num_motifs=1, motif_length=10, motifs=None,
-                 target_length=20, fix_random_region_length=True, error_rate=0, generate_motifs=True, middle_insert_range=[2, 6],
-                 seed=0, add_primer=True, forward_primer="AAAAA", reverse_primer="GGGGG", one_side_proba=0.5, paired=False):
+                 target_length=20, fix_random_region_length=True, error_rate=0, generate_motifs=True,
+                 middle_insert_range=[2, 6],
+                 seed=0, add_primer=True, forward_primer="AAAAA", reverse_primer="GGGGG", one_side_proba=0.5,
+                 paired=False):
         np.random.seed(seed)
 
         if generate_motifs:
@@ -78,10 +82,10 @@ class SequenceGenerator():
             self.motifs = motifs
 
         self.error_indices = 1 + \
-            np.argsort(np.random.random(size=motif_length-1))[:3]
+                             np.argsort(np.random.random(size=motif_length - 1))[:3]
         self.mut_idx, self.ins_idx, self.del_idx = self.error_indices
 
-        logger.info(f"error rate is {error_rate*100:.1f}%")
+        logger.info(f"error rate is {error_rate * 100:.1f}%")
         for idx, motif in enumerate(self.motifs):
             seq = [ch for ch in motif]
             mut = self.mutate(seq[self.mut_idx])
@@ -139,7 +143,7 @@ class SequenceGenerator():
                     seq, nrange=self.middle_insert_range, one_side_proba=self.one_side_proba)
                 paired_indices += [idx]
             random_region = "".join(np.random.choice(
-                list("ATGC"), size=self.target_length-len(seq)))
+                list("ATGC"), size=self.target_length - len(seq)))
             l = np.random.randint(len(random_region))
             if self.add_primer:
                 sequences.append(
@@ -157,16 +161,16 @@ class SequenceGenerator():
         n = np.random.randint(*nrange)
         if np.random.random() < one_side_proba:
             if np.random.choice(["l", "r"]) == "l":
-                l_motif = sequence[:len(sequence)//2]
+                l_motif = sequence[:len(sequence) // 2]
                 r_motif = ""
                 idx = 1
             else:
                 l_motif = ""
-                r_motif = sequence[len(sequence)//2:]
+                r_motif = sequence[len(sequence) // 2:]
                 idx = 2
         else:
-            l_motif = sequence[:len(sequence)//2]
-            r_motif = sequence[len(sequence)//2:]
+            l_motif = sequence[:len(sequence) // 2]
+            r_motif = sequence[len(sequence) // 2:]
             idx = 0
         return l_motif + "".join(np.random.choice(list("ATGC"), size=n)) + r_motif, idx
 
@@ -203,11 +207,12 @@ class SingleRound:
     """pass path or raw_reads to make class of selex experiment per round.
     """
 
-    def __init__(self, raw_reads: list = None, forward_adapter=None, reverse_adapter=None, name=None, tolerance=0, path: str = None, max_len=None):
+    def __init__(self, raw_reads: list = None, forward_adapter=None, reverse_adapter=None, name=None, tolerance=0,
+                 path: str = None, max_len=None):
         assert path is not None or raw_reads is not None, "either path or raw_reads has to be specified"
         if path:
             path = Path(path)
-            if path .suffix == ".fastq":
+            if path.suffix == ".fastq":
                 logger.info("reading fastq format sequence")
                 raw_reads = read_fastq(path)
             elif path.suffix in {".fasta", ".fa"}:
@@ -250,7 +255,7 @@ class SingleRound:
         self.reverse_adapter_length = len(reverse_adapter)
 
         self.random_region_length = self.target_length - \
-            self.reverse_adapter_length - self.forward_adapter_length
+                                    self.reverse_adapter_length - self.forward_adapter_length
         if set_max_len:
             self.random_region_length = self.max_len
 
@@ -280,7 +285,7 @@ class SingleRound:
             top_seq, top_count = sorted(d.items(), key=lambda x: -x[1])[0]
             if max_count is not None and top_count < max_count * 0.5:  # heuristics
                 logger.info(
-                    f"estimated forward adapter len is {i-1} : {est_adapter}")
+                    f"estimated forward adapter len is {i - 1} : {est_adapter}")
                 break
             max_count = sorted(d.items(), key=lambda x: -x[1])[0][1]
             if max_count < sum(self.read_counter.values()) * 0.5:
@@ -303,7 +308,7 @@ class SingleRound:
             top_seq, top_count = sorted(d.items(), key=lambda x: -x[1])[0]
             if max_count is not None and top_count < max_count * 0.5:  # heuristics
                 logger.info(
-                    f"estimated reverse adapter len is {i-1} : {est_adapter}")
+                    f"estimated reverse adapter len is {i - 1} : {est_adapter}")
                 break
             max_count = sorted(d.items(), key=lambda x: -x[1])[0][1]
             if max_count < sum(self.read_counter.values()) * 0.5:
@@ -335,15 +340,22 @@ class SingleRound:
 
     def filter_function(self, read):
         has_forward = read[: self.forward_adapter_length] == self.forward_adapter \
-            or self.forward_adapter_length == 0
+                      or self.forward_adapter_length == 0
         has_reverse = read[-self.reverse_adapter_length:] == self.reverse_adapter \
-            or self.reverse_adapter_length == 0
+                      or self.reverse_adapter_length == 0
         match_random_region_len = abs(
             len(read) - self.target_length) <= self.tolerance
         return has_forward and has_reverse and match_random_region_len
 
     def get_filter_passed_sequences(self, random_only=False):
         self.filter_passed = list(filter(self.filter_function, self.raw_reads))
+        # saving filtered pass sequences into a file
+        with open('../data/sample/filtered_seqs.csv', mode='w') as out_file:
+            seq_writer = csv.writer(out_file)
+            seq_writer.writerow(['sequence'])
+            for seq in self.filter_passed:
+                seq_writer.writerow([seq])
+
         if random_only:
             return [self.cut_adapters(read) for read in self.filter_passed]
         return self.filter_passed
@@ -353,7 +365,7 @@ class SingleRound:
             ret = seq[self.forward_adapter_length:]
         else:
             ret = seq[self.forward_adapter_length: -
-                      self.reverse_adapter_length]
+            self.reverse_adapter_length]
         if self.max_len is not None:
             return ret[len(ret) // 2 - self.max_len // 2: len(ret) // 2 - self.max_len // 2 + self.max_len]
         else:
@@ -368,7 +380,7 @@ class SingleRound:
 
         self.min_count = min_count
         kwargs = {'num_workers': 1, 'pin_memory': True} if (
-            use_cuda and torch.cuda.is_available()) else {}
+                use_cuda and torch.cuda.is_available()) else {}
         # load RAPT1-4R and filter reads to count>1, then make it to one hot encoded tensor
         c = self.get_filter_passed_sequences(random_only=True)
         sequences = list(
@@ -382,9 +394,9 @@ class SingleRound:
         train_data = torch.from_numpy(train_data).long()
         test_data = torch.from_numpy(test_data).long()
         train_loader = DataLoader(
-            train_data, batch_size=batch_size, shuffle=True,  **kwargs)
+            train_data, batch_size=batch_size, shuffle=True, **kwargs)
         test_loader = DataLoader(
-            test_data,  batch_size=batch_size, shuffle=False, **kwargs)
+            test_data, batch_size=batch_size, shuffle=False, **kwargs)
         return train_loader, test_loader
 
 
@@ -477,7 +489,7 @@ def local_alignment(s1, s2, print_result=False, global_alignment=False):
 
 
 # from https://rosettacode.org/wiki/Levenshtein_distance#Memoized_recursive_version_2
-@lru_cache(maxsize=2**26)
+@lru_cache(maxsize=2 ** 26)
 def edit_distance(s, t):
     if not s:
         return len(t)
@@ -527,7 +539,7 @@ class ProfileHMMSampler():
             else:
                 logger.info("something wrong")
 
-            state = np.random.choice([State.M, State.I, State.D], p=p/sum(p))
+            state = np.random.choice([State.M, State.I, State.D], p=p / sum(p))
             if state != State.I:
                 idx += 1
             states.append((idx, state))
@@ -537,9 +549,9 @@ class ProfileHMMSampler():
             if state == State.M:
                 # logger.info("{:.2f}, {:.2f}, {:.2f}, {:.2f}".format(*self.e[idx-1]))
 
-                seq += np.random.choice(list("ATGC"), p=self.e[idx-1])
+                seq += np.random.choice(list("ATGC"), p=self.e[idx - 1])
                 if debug:
-                    logger.info(idx, state, self.e[idx-1], seq[-1])
+                    logger.info(idx, state, self.e[idx - 1], seq[-1])
             elif state == State.I:
                 seq += np.random.choice(list("atgc"))
             else:
@@ -572,7 +584,7 @@ class ProfileHMMSampler():
             else:
                 logger.info("something wrong")
             p[np.argmax(p)] += 1000000
-            state = np.random.choice([State.M, State.I, State.D], p=p/sum(p))
+            state = np.random.choice([State.M, State.I, State.D], p=p / sum(p))
             if state != State.I:
                 idx += 1
             states.append((idx, state))
@@ -582,9 +594,9 @@ class ProfileHMMSampler():
 
             if state == State.M:
                 # logger.info("{:.2f}, {:.2f}, {:.2f}, {:.2f}".format(*self.e[idx-1]))
-                p = np.copy(self.e[idx-1])
+                p = np.copy(self.e[idx - 1])
                 p[np.argmax(p)] += 100000
-                seq += np.random.choice(list("ATGC"), p=p/sum(p))
+                seq += np.random.choice(list("ATGC"), p=p / sum(p))
             elif state == State.I:
                 seq += "N"
             else:
@@ -610,22 +622,22 @@ class ProfileHMMSampler():
         for i in range(random_len + 1):
             for j in range(model_len + 1):
                 # State M
-                if j*i != 0:
+                if j * i != 0:
                     F[State.M, j, i] = e[j - 1][one_hot_seq[i - 1]] + \
-                        torch.logsumexp(torch.stack((
-                            a[j - 1, Transition.M2M] +
-                            F[State.M, j - 1, i - 1],
-                            a[j - 1, Transition.I2M] +
-                            F[State.I, j - 1, i - 1],
-                            a[j - 1, Transition.D2M] + F[State.D, j - 1, i - 1])), dim=0)
+                                       torch.logsumexp(torch.stack((
+                                           a[j - 1, Transition.M2M] +
+                                           F[State.M, j - 1, i - 1],
+                                           a[j - 1, Transition.I2M] +
+                                           F[State.I, j - 1, i - 1],
+                                           a[j - 1, Transition.D2M] + F[State.D, j - 1, i - 1])), dim=0)
 
                 # State I
                 if i != 0:
                     F[State.I, j, i] = - 1.3863 + \
-                        torch.logsumexp(torch.stack((
-                            a[j, Transition.M2I] + F[State.M, j, i-1],
-                            a[j, Transition.I2I] + F[State.I, j, i-1]
-                        )), dim=0)
+                                       torch.logsumexp(torch.stack((
+                                           a[j, Transition.M2I] + F[State.M, j, i - 1],
+                                           a[j, Transition.I2I] + F[State.I, j, i - 1]
+                                       )), dim=0)
 
                 # State D
                 if j != 0:
@@ -635,7 +647,7 @@ class ProfileHMMSampler():
                             a[j - 1, Transition.D2D] + F[State.D, j - 1, i]
                         )), dim=0)
 
-        F[State.M, model_len+1, random_len] = \
+        F[State.M, model_len + 1, random_len] = \
             torch.logsumexp(torch.stack((
                 a[model_len, Transition.M2M] +
                 F[State.M, model_len, random_len],
@@ -645,7 +657,7 @@ class ProfileHMMSampler():
                 F[State.D, model_len, random_len]
             )), dim=0)
 
-        return F[State.M, model_len+1, random_len]
+        return F[State.M, model_len + 1, random_len]
 
 
 class Result():
@@ -739,7 +751,7 @@ class Result():
         from sklearn.mixture import GaussianMixture
         logger.info("calculating gmm centers")
         X = self.mus
-        gmm_path = self.path_to_save_results/"gmm.pkl"
+        gmm_path = self.path_to_save_results / "gmm.pkl"
         if gmm_path.exists():
             logger.info(f"loading {gmm_path}")
             with gmm_path.open("rb") as f:
@@ -809,7 +821,7 @@ class Result():
 
         ax.axis("square")
         if save:
-            fig.savefig(self.path_to_save_results/'gmm.png')
+            fig.savefig(self.path_to_save_results / 'gmm.png')
         return ax
 
     @provide_ax
@@ -826,9 +838,9 @@ class Result():
             if meshgrid:
                 XY_ = []
                 for xy, cnt in zip(XY, [c[seq] for seq in self.seqs]):
-                    XY_ += [xy]*int(np.log2(cnt))
+                    XY_ += [xy] * int(np.log2(cnt))
                 heatmap, xedges, yedges = np.histogram2d(
-                    * np.stack(XY_).T, bins=100, range=((-3, 3), (-3, 3)))
+                    *np.stack(XY_).T, bins=100, range=((-3, 3), (-3, 3)))
             else:
                 cs = ax.scatter(*XY.T, s=2, c=sorted(counts), vmin=0)
                 cbar = fig.colorbar(cs)
@@ -842,7 +854,7 @@ class Result():
         ax.axis("square")
 
         if save:
-            fig.savefig(self.path_to_save_results/'means.png')
+            fig.savefig(self.path_to_save_results / 'means.png')
         return ax
 
     @provide_ax
@@ -861,7 +873,7 @@ class Result():
         self.bo_sigma = sigma
 
         cont = ax.contour(self.bo_grid_x, self.bo_grid_y, -
-                          (self.bo_mu-self.bo_sigma).reshape(n_grid, n_grid))
+        (self.bo_mu - self.bo_sigma).reshape(n_grid, n_grid))
         cont.clabel(fmt='%1.1f', fontsize=8)
         divider = make_axes_locatable(ax)
         cax = divider.append_axes('right', size='5%', pad=0.05)
@@ -870,7 +882,7 @@ class Result():
                    c=self.evaluated_y[:, 0], cmap="bwr_r", ec="grey", lw=0.5, zorder=40, label="evaluated")
         if with_index:
             for i, (x, y) in enumerate(self.evaluated_X):
-                ax.text(x, y, " "+str(i), color="blue", va="center")
+                ax.text(x, y, " " + str(i), color="blue", va="center")
 
         ax.scatter(*self.next_locations.T, marker="*",
                    color="k", zorder=50, label="bo proposed")
@@ -885,17 +897,17 @@ class Result():
         if hasattr(self, "next_locations") and not force_rerun:
             return self.next_locations
         import GPyOpt
-        bo_path = self.path_to_save_results/"bo.pkl"
+        bo_path = self.path_to_save_results / "bo.pkl"
         if bo_path.exists() and not force_rerun:
             logger.info(f"loading {bo_path}")
             with bo_path.open("rb") as f:
                 self.bo = pickle.load(f)
         else:
             logger.info("calculating bo")
-            assert self.evaluated_X is not None and self.evaluated_y is not None,\
+            assert self.evaluated_X is not None and self.evaluated_y is not None, \
                 "(N, d) array: `evaluated_X` and (N, 1) array: `evaluated_y` should be set"
             self.domain = domain
-            self.constraints = [{"name": f"var_{i+1}",
+            self.constraints = [{"name": f"var_{i + 1}",
                                  "type": "continuous",
                                  "domain": self.domain}
                                 for i in range(self.evaluated_X.shape[1])]
@@ -934,8 +946,8 @@ class Result():
             rets = []
             for nt_set in products:
                 ret = ""
-                for part, nt in zip(seq_pattern.split("*"), list(nt_set)+[""]):
-                    ret += part+nt
+                for part, nt in zip(seq_pattern.split("*"), list(nt_set) + [""]):
+                    ret += part + nt
                 rets += [ret]
             if len(rets) > eval_max:
                 rets = [rets[idx] for idx in np.argsort(
@@ -993,7 +1005,7 @@ class Result():
 
         # for mean plot
         length = 20
-        v = np.sin(np.arange(length)/(length-1)*np.pi)
+        v = np.sin(np.arange(length) / (length - 1) * np.pi)
         v /= sum(v)
 
         i = 0
@@ -1002,13 +1014,13 @@ class Result():
             test_losses = np.array(self.result_df[arr_name])
             epochs = np.arange(len(test_losses))
             conv_indices, conv_values = np.array(
-                epochs[:-length+1])+length//2, np.convolve(test_losses, v, mode='valid')
+                epochs[:-length + 1]) + length // 2, np.convolve(test_losses, v, mode='valid')
             ax.plot(test_losses, c=cmap(i))
 
-            ax.plot(conv_indices, conv_values, c=cmap(i+1), label=arr_name)
-            ax.plot(conv_indices[-1], conv_values[-1], marker='.', c=cmap(i+1))
+            ax.plot(conv_indices, conv_values, c=cmap(i + 1), label=arr_name)
+            ax.plot(conv_indices[-1], conv_values[-1], marker='.', c=cmap(i + 1))
             ax.text(np.argmin(test_losses) + 1, np.min(test_losses),
-                    f"←{np.min(test_losses):.2f}", ha="left", va="top", c=cmap(i+1), rotation=-45, fontsize=8,
+                    f"←{np.min(test_losses):.2f}", ha="left", va="top", c=cmap(i + 1), rotation=-45, fontsize=8,
                     bbox=dict(ec=(1, 1, 1, 1), facecolor="w", alpha=1, pad=0))
             i += 2
 
@@ -1017,19 +1029,19 @@ class Result():
             test_losses = np.array(self.result_df[arr_name])
             epochs = np.arange(len(test_losses))
             conv_indices, conv_values = np.array(
-                epochs[:-length+1])+length//2, np.convolve(test_losses, v, mode='valid')
+                epochs[:-length + 1]) + length // 2, np.convolve(test_losses, v, mode='valid')
             ay.plot(test_losses, c=cmap(i))
 
-            ay.plot(conv_indices, conv_values, c=cmap(i+1), label=arr_name)
-            ay.plot(conv_indices[-1], conv_values[-1], marker='.', c=cmap(i+1))
+            ay.plot(conv_indices, conv_values, c=cmap(i + 1), label=arr_name)
+            ay.plot(conv_indices[-1], conv_values[-1], marker='.', c=cmap(i + 1))
 
             i += 2
 
         min_test_loss = min(self.result_df.test_loss)
         min_test_recon = min(self.result_df.test_recon)
-        dloss = abs(min_test_loss-min_test_recon)
-        ax.set_ylim(min_test_recon-dloss*0.6, min_test_loss+dloss*0.6)
-        ay.set_ylim(-dloss*0.1, dloss*2.1)
+        dloss = abs(min_test_loss - min_test_recon)
+        ax.set_ylim(min_test_recon - dloss * 0.6, min_test_loss + dloss * 0.6)
+        ay.set_ylim(-dloss * 0.1, dloss * 2.1)
 
         ax.plot((nwarmup, nwarmup), (0, 100), "--",
                 c="gray", label="profile hmm warmup")
@@ -1043,7 +1055,7 @@ class Result():
         ay.legend()
         ax.set_title("training result")
         if save:
-            fig.savefig(self.path_to_save_results/'training.png')
+            fig.savefig(self.path_to_save_results / 'training.png')
 
 
 class Experiments():
@@ -1080,7 +1092,7 @@ class Experiments():
         return results
 
     def kmer(self, seq):
-        return [seq[i: i+self.k] for i in range(len(seq)-self.k+1)]
+        return [seq[i: i + self.k] for i in range(len(seq) - self.k + 1)]
 
     def kmer_count(self, seq, to_list=False):
         from collections import Counter
@@ -1099,7 +1111,7 @@ class Experiments():
         whole_read_counts = Counter(
             [seq for experiment in self.rounds for seq in experiment.get_filter_passed_sequences(random_only=True)])
         whole_reads = [x[0] for x in filter(
-            lambda x:x[1] >= min_count, whole_read_counts.most_common())]
+            lambda x: x[1] >= min_count, whole_read_counts.most_common())]
         pbar.set_description("calculating kmer distribution")
         if not hasattr(self, "whole_reads_kmer"):
             self.whole_reads_kmer = np.stack(
@@ -1109,7 +1121,7 @@ class Experiments():
             f.write(
                 "idx\tgenerate_seq\texact_match_in\tnearest_selex_seq\tscore\tselex_aligned\tgenerate_aligned\t")
             f.write(
-                "\t".join([experiment.name for experiment in self.rounds])+"\n")
+                "\t".join([experiment.name for experiment in self.rounds]) + "\n")
 
             # for sequence in query
             for idx, most_probable_seq in enumerate(sequences):
